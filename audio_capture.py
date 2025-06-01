@@ -95,11 +95,9 @@ class AudioRecorder:
             return
 
         try:
-            # Concatenate all frames into a single numpy array
             audio_data = np.concatenate(self.frames, axis=0)
-            # Save the audio data as a WAV file
-            sf.write(output_filename, audio_data, self.samplerate)
-            print(f"Audio saved to {output_filename}")
+            sf.write(output_filepath, audio_data, self.samplerate) # Changed output_filename to output_filepath
+            print(f"Audio saved to {output_filepath}")
         except Exception as e:
             print(f"Error saving audio file: {e}")
 
@@ -111,11 +109,11 @@ class AudioRecorder:
         """Returns the queue for accessing live raw audio chunks (for transcription)."""
         return self.transcription_audio_queue
 
-    def save_redacted_audio(self, output_filename, mute_segments_time_list):
+    def save_redacted_audio(self, output_filepath, mute_segments_time_list): # Changed output_filename to output_filepath
         """
         Saves a version of the recorded audio with specified segments muted.
 
-        :param output_filename: Filename for the redacted audio.
+        :param output_filepath: Full filepath for the redacted audio.
         :param mute_segments_time_list: A list of (start_time, end_time) tuples in seconds.
         """
         if not self.frames:
@@ -152,13 +150,18 @@ class AudioRecorder:
                     redacted_audio_data[start_sample:end_sample, :] = 0
 
             sf.write(output_filename, redacted_audio_data, self.samplerate)
-            print(f"Redacted audio saved to {output_filename}")
+            print(f"Redacted audio saved to {output_filepath}") # Changed output_filename to output_filepath
 
         except Exception as e:
             print(f"Error saving redacted audio file: {e}")
 
 
 if __name__ == '__main__':
+    import os # For path joining in test
+    # Create a dummy test_outputs directory if it doesn't exist
+    test_output_dir = "test_outputs_audio_capture"
+    os.makedirs(test_output_dir, exist_ok=True)
+
     recorder = AudioRecorder()
 
     # Test Case 1: Basic recording and queue check (conceptual)
@@ -196,8 +199,8 @@ if __name__ == '__main__':
 
         print(f"Live checks: RMS queue got {live_rms_checks} items, Transcription queue got {live_transcription_checks} items.")
 
-        original_filename = "test_audio_3s_original.wav"
-        recorder.stop_recording(original_filename)
+        original_filepath = os.path.join(test_output_dir, "test_audio_3s_original.wav")
+        recorder.stop_recording(output_filepath=original_filepath) # Use full path
 
         print("\n--- Post-recording checks & Redaction Test ---")
         rms_q = recorder.get_audio_chunk_queue()
@@ -234,12 +237,11 @@ if __name__ == '__main__':
                  print(f"Warning: Sample mismatch. Transcription queue had {total_samples}, self.frames had {expected_total_samples}")
 
         # Test saving redacted audio
-        if recorder.frames: # Ensure there's audio data
-            # Dummy mute segments for testing: e.g., mute from 0.5s to 1s, and 1.5s to 2s
+        if recorder.frames:
             dummy_mute_segments = [(0.5, 1.0), (1.5, 2.0), (2.5, 2.8)]
-            redacted_filename = "test_audio_3s_redacted.wav"
-            print(f"\nAttempting to save redacted audio to '{redacted_filename}' with segments: {dummy_mute_segments}")
-            recorder.save_redacted_audio(redacted_filename, dummy_mute_segments)
+            redacted_filepath = os.path.join(test_output_dir, "test_audio_3s_redacted.wav") # Use full path
+            print(f"\nAttempting to save redacted audio to '{redacted_filepath}' with segments: {dummy_mute_segments}")
+            recorder.save_redacted_audio(output_filepath=redacted_filepath, mute_segments_time_list=dummy_mute_segments) # Use full path
         else:
             print("\nSkipping redacted audio test as no frames were recorded.")
 
