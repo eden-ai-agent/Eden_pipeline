@@ -111,6 +111,53 @@ class AudioRecorder:
         """Returns the queue for accessing live raw audio chunks (for transcription)."""
         return self.transcription_audio_queue
 
+    def save_redacted_audio(self, output_filename, mute_segments_time_list):
+        """
+        Saves a version of the recorded audio with specified segments muted.
+
+        :param output_filename: Filename for the redacted audio.
+        :param mute_segments_time_list: A list of (start_time, end_time) tuples in seconds.
+        """
+        if not self.frames:
+            print("No frames recorded to save redacted audio from.")
+            return
+        if self.is_recording:
+            print("Cannot save redacted audio while recording is in progress. Stop recording first.")
+            return
+        if self.samplerate == 0:
+            print("Samplerate is 0, cannot process audio for redaction.")
+            return
+
+        print(f"Preparing to save redacted audio to {output_filename} with {len(mute_segments_time_list)} mute segments.")
+
+        try:
+            full_audio_data = np.concatenate(self.frames, axis=0)
+            redacted_audio_data = full_audio_data.copy()
+
+            for start_time, end_time in mute_segments_time_list:
+                start_sample = int(start_time * self.samplerate)
+                end_sample = int(end_time * self.samplerate)
+
+                # Boundary checks
+                if start_sample < 0: start_sample = 0
+                if end_sample > len(redacted_audio_data): end_sample = len(redacted_audio_data)
+                if start_sample >= end_sample: # If segment is invalid or outside bounds after clamping
+                    # print(f"Skipping invalid or out-of-bounds mute segment: ({start_time:.2f}s, {end_time:.2f}s)")
+                    continue
+
+                # print(f"Muting from {start_time:.2f}s ({start_sample}) to {end_time:.2f}s ({end_sample})")
+                if self.channels == 1:
+                    redacted_audio_data[start_sample:end_sample] = 0
+                else: # Stereo or multi-channel
+                    redacted_audio_data[start_sample:end_sample, :] = 0
+
+            sf.write(output_filename, redacted_audio_data, self.samplerate)
+            print(f"Redacted audio saved to {output_filename}")
+
+        except Exception as e:
+            print(f"Error saving redacted audio file: {e}")
+
+
 if __name__ == '__main__':
     recorder = AudioRecorder()
 
@@ -148,11 +195,11 @@ if __name__ == '__main__':
                 pass
 
         print(f"Live checks: RMS queue got {live_rms_checks} items, Transcription queue got {live_transcription_checks} items.")
-        # time.sleep(1) # Ensure recording runs for roughly 3 seconds. This time.sleep is now part of the loop.
 
-        recorder.stop_recording("test_audio_3s_with_queues.wav")
+        original_filename = "test_audio_3s_original.wav"
+        recorder.stop_recording(original_filename)
 
-        print("\nPost-recording queue checks:")
+        print("\n--- Post-recording checks & Redaction Test ---")
         rms_q = recorder.get_audio_chunk_queue()
         rms_count = 0
         while not rms_q.empty():
@@ -179,15 +226,24 @@ if __name__ == '__main__':
         print(f"Total audio samples in transcription queue (post-recording): {total_samples}")
 
         if live_transcription_checks == 0 and transcription_count == 0 and recorder.frames:
-             print("Warning: Frames were recorded, but transcription queue is empty. Check callback logic.")
+             print("Warning: Transcription queue was empty during/after recording. Check callback.")
         elif recorder.frames:
             expected_total_samples = sum(len(f) for f in recorder.frames)
-            print(f"Total samples recorded to self.frames: {expected_total_samples}")
-            if total_samples != expected_total_samples:
-                 print(f"Warning: Mismatch in samples. Transcription queue had {total_samples}, self.frames had {expected_total_samples}")
+            print(f"Total samples in self.frames: {expected_total_samples}")
+            if total_samples != expected_total_samples and transcription_count > 0 : # If queue had items but not all
+                 print(f"Warning: Sample mismatch. Transcription queue had {total_samples}, self.frames had {expected_total_samples}")
 
+        # Test saving redacted audio
+        if recorder.frames: # Ensure there's audio data
+            # Dummy mute segments for testing: e.g., mute from 0.5s to 1s, and 1.5s to 2s
+            dummy_mute_segments = [(0.5, 1.0), (1.5, 2.0), (2.5, 2.8)]
+            redacted_filename = "test_audio_3s_redacted.wav"
+            print(f"\nAttempting to save redacted audio to '{redacted_filename}' with segments: {dummy_mute_segments}")
+            recorder.save_redacted_audio(redacted_filename, dummy_mute_segments)
+        else:
+            print("\nSkipping redacted audio test as no frames were recorded.")
 
     else:
         print("Failed to start recording. Check audio device availability and permissions.")
 
-    print("\nAudio recording test with both queues finished.")
+    print("\nAudio recording and redaction test finished.")

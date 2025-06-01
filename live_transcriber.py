@@ -23,10 +23,12 @@ class LiveTranscriber:
         self.frames_to_accumulate = self.sample_rate * self.accumulation_seconds
 
         self.transcribed_text_queue = queue.Queue()
-        self.model = None # Loaded in start() or a dedicated load method
+        self.model = None
         self.is_running = False
         self.transcription_thread = None
-        self._load_model() # Load model during init
+        self.current_audio_offset = 0.0 # To track absolute time for word timestamps
+
+        self._load_model()
 
     def _load_model(self):
         print(f"Loading Whisper model: {self.model_size} ({self.device}, {self.compute_type})")
@@ -67,19 +69,38 @@ class LiveTranscriber:
                         # Sounddevice usually gives float32 in [-1.0, 1.0] range.
 
                         # print(f"Transcribing segment of {len(segment_to_transcribe)/self.sample_rate:.2f}s")
+                        # Record the starting offset for this specific segment
+                        segment_start_offset = self.current_audio_offset
+                        # Update the global offset by the duration of the segment just processed
+                        segment_duration = len(segment_to_transcribe) / self.sample_rate
+                        self.current_audio_offset += segment_duration
+
+                        # print(f"Transcribing segment of {segment_duration:.2f}s, offset: {segment_start_offset:.2f}s")
                         try:
-                            segments, info = self.model.transcribe(
+                            # Enable word timestamps
+                            segments_iterable, info = self.model.transcribe(
                                 segment_to_transcribe,
                                 beam_size=5,
-                                # language="en", # Optional: specify language
-                                # without_timestamps=True, # Optional
+                                word_timestamps=True # Request word-level timestamps
+                                # language="en", # Optional
                             )
-                            for segment in segments:
-                                # print(f"[{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}")
-                                self.transcribed_text_queue.put(segment.text.strip())
+                            for segment in segments_iterable:
+                                adjusted_word_info = []
+                                if segment.words:
+                                    for word in segment.words:
+                                        adjusted_word_info.append({
+                                            'word': word.word,
+                                            'start': word.start + segment_start_offset,
+                                            'end': word.end + segment_start_offset,
+                                            'probability': word.probability
+                                        })
+                                # Output tuple: (full_segment_text, list_of_word_timestamp_dicts)
+                                output_tuple = (segment.text.strip(), adjusted_word_info)
+                                self.transcribed_text_queue.put(output_tuple)
                         except Exception as e:
-                            print(f"Error during transcription: {e}")
-                            # If transcription fails, clear frames to avoid reprocessing bad data repeatedly
+                            print(f"Error during transcription with word timestamps: {e}")
+                            # If transcription fails, roll back offset update for this failed segment
+                            self.current_audio_offset -= segment_duration
                             accumulated_frames = []
                             current_audio_length_samples = 0
 
@@ -100,13 +121,18 @@ class LiveTranscriber:
 
         if self.model is None:
             print("Model not loaded. Cannot start transcription.")
-            # Or try loading again: self._load_model()
-            # if self.model is None: return # if load failed
+            # Or try loading again: self._load_model() if it failed before.
             return
 
         self.is_running = True
+        self.current_audio_offset = 0.0 # Reset offset for a new session
+        # Clear queue from previous run
+        while not self.transcribed_text_queue.empty():
+            try: self.transcribed_text_queue.get_nowait()
+            except queue.Empty: break
+
         self.transcription_thread = threading.Thread(target=self._transcription_loop)
-        self.transcription_thread.daemon = True # Allow main program to exit even if thread is running
+        self.transcription_thread.daemon = True
         self.transcription_thread.start()
         print("LiveTranscriber started.")
 
@@ -224,5 +250,5 @@ if __name__ == '__main__':
     # Or if download_root was used effectively by WhisperModel and its dependencies: ./models/faster_whisper
     # Check faster_whisper docs for precise control over model download location.
     # For this script, we assume `WhisperModel` handles downloads transparently.
-    import sys # ensure sys is imported for sys.exit()
-    sys.exit(0) # Ensure the test script exits properly for sandbox.
+    import sys
+    sys.exit(0)
