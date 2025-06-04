@@ -1,6 +1,13 @@
 import datetime
 import json
 import os
+import logging # Added
+
+# Get a logger instance for this module.
+# It will inherit the configuration from the root logger if app.py (or another entry point)
+# has already configured logging. If this module is run standalone or imported first,
+# this logger might not output as expected until logging is configured.
+module_logger = logging.getLogger(__name__)
 
 class AuditLogger:
     def __init__(self, log_filepath: str):
@@ -10,19 +17,17 @@ class AuditLogger:
         """
         self.log_filepath = log_filepath
         try:
-            # Ensure the directory for the log file exists
             log_dir = os.path.dirname(self.log_filepath)
-            if log_dir and not os.path.exists(log_dir): # Check if log_dir is not empty (e.g. for relative paths)
+            if log_dir and not os.path.exists(log_dir):
                 os.makedirs(log_dir, exist_ok=True)
 
-            # Touch the file to ensure it's creatable/writable, and it exists for append operations
             with open(self.log_filepath, 'a', encoding='utf-8') as f:
-                pass # File created if it didn't exist, or opened if it did.
+                pass
         except Exception as e:
-            # This is a critical error if the logger can't be initialized.
-            # Depending on application policy, this might need to halt startup.
-            print(f"CRITICAL: AuditLogger failed to initialize log file at {self.log_filepath}: {e}")
-            # raise # Optionally re-raise to signal failure to the application
+            # Use the module_logger for this critical initialization error.
+            module_logger.critical(f"AuditLogger failed to initialize log file at {self.log_filepath}: {e}", exc_info=True)
+            # Optionally re-raise if the application should not continue without a working audit log.
+            # raise
 
     def log_action(self, action_type: str, details: dict = None):
         """
@@ -30,76 +35,81 @@ class AuditLogger:
         :param action_type: A string describing the type of action (e.g., "USER_LOGIN", "FILE_ENCRYPTED").
         :param details: A dictionary containing additional structured information about the event.
         """
+        log_entry = {} # Initialize in case of early failure
         try:
-            # Ensure timestamp is always UTC and in ISO format
             timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
             log_entry = {
                 "timestamp": timestamp,
                 "action": action_type
             }
-
             if details is not None and isinstance(details, dict):
-                log_entry.update(details)
+                # Create a new dictionary for the log entry to avoid modifying the original 'details'
+                # if it's passed around and used elsewhere.
+                current_entry_details = details.copy()
+                log_entry["details"] = current_entry_details # Store details under a 'details' key
 
-            # Convert the log entry dictionary to a JSON string
-            log_line = json.dumps(log_entry, ensure_ascii=False) # ensure_ascii=False for better UTF-8 handling
+            log_line = json.dumps(log_entry, ensure_ascii=False)
 
-            # Append the JSON string as a new line to the log file
             with open(self.log_filepath, 'a', encoding='utf-8') as f:
                 f.write(log_line + '\n')
 
         except Exception as e:
-            # Log to console if file logging fails, to not lose the audit trail completely.
-            print(f"ERROR: Failed to write to audit log file {self.log_filepath}. Log Entry: {log_entry if 'log_entry' in locals() else 'Unknown'}. Error: {e}")
-            # Depending on policy, could try a fallback log or raise an alert.
+            # Use the module_logger if writing to the audit file fails.
+            # Include the log_entry that failed to be written.
+            module_logger.error(f"Failed to write to audit log file {self.log_filepath}. Log Entry: {log_entry}. Error: {e}", exc_info=True)
+
 
 if __name__ == '__main__':
-    print("--- Testing AuditLogger ---")
+    # Basic logging configuration for standalone testing of audit_logger.py
+    # This will print to console. If app.py runs this, app.py's config will be used.
+    if not logging.getLogger().handlers: # Check if root logger has no handlers
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+    module_logger.info("--- Testing AuditLogger ---")
     test_log_filename = "test_audit.log"
 
-    # Ensure no old test file exists
     if os.path.exists(test_log_filename):
         os.remove(test_log_filename)
+        module_logger.info(f"Removed old test log file: {test_log_filename}")
 
-    logger = AuditLogger(log_filepath=test_log_filename)
+    # Initialize AuditLogger instance for testing
+    # Note: The critical log inside AuditLogger.__init__ might not show in console
+    # if this script is run standalone and the init fails, unless basicConfig is called before instantiation.
+    # However, for this test, we assume initialization is successful.
+    audit_trail_logger = AuditLogger(log_filepath=test_log_filename)
 
-    # Test log actions
-    logger.log_action("APP_START", {"version": "1.0.0", "user_id": "system"})
-    logger.log_action("USER_CONSENT_GIVEN", {"session_id": "sess_001", "consent_type": "recording"})
-    logger.log_action("RECORDING_STARTED", {"session_id": "sess_001", "device": "default_mic"})
-    logger.log_action("PII_DETECTED", {"session_id": "sess_001", "entity_type": "PERSON", "count": 2})
-    logger.log_action("FILE_SAVED", {"session_id": "sess_001", "filename": "full_audio.wav", "path": "standard/full_audio.wav"})
-    logger.log_action("FILE_ENCRYPTED", {"session_id": "sess_001", "filename": "full_audio.wav.enc", "algorithm": "AES-GCM"})
-    logger.log_action("RECORDING_STOPPED", {"session_id": "sess_001", "duration_seconds": 125.5})
-    logger.log_action("APP_SHUTDOWN")
+    module_logger.info("Logging test actions...")
+    audit_trail_logger.log_action("APP_START", {"version": "1.0.0", "user_id": "system_test"})
+    audit_trail_logger.log_action("USER_CONSENT_GIVEN", {"session_id": "sess_test_001", "consent_type": "recording"})
+    audit_trail_logger.log_action("RECORDING_STARTED", {"session_id": "sess_test_001", "device": "default_mic_test"})
+    audit_trail_logger.log_action("PII_DETECTED", {"session_id": "sess_test_001", "entity_type": "PERSON_TEST", "count": 2})
+    audit_trail_logger.log_action("FILE_SAVED", {"session_id": "sess_test_001", "filename": "test_audio.wav", "path": "standard/test_audio.wav"})
+    audit_trail_logger.log_action("FILE_ENCRYPTED", {"session_id": "sess_test_001", "filename": "test_audio.wav.enc", "algorithm": "AES-GCM_TEST"})
+    audit_trail_logger.log_action("RECORDING_STOPPED", {"session_id": "sess_test_001", "duration_seconds": 125.5})
+    audit_trail_logger.log_action("APP_SHUTDOWN_TEST")
 
-    print(f"Test log actions written to '{test_log_filename}'.")
+    module_logger.info(f"Test log actions written to '{test_log_filename}'.")
 
-    # Verify content
     try:
         with open(test_log_filename, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
-        if len(lines) == 8: # Should be 8 log entries
-            print("Audit log file content verification: Number of lines is correct.")
-            # Further checks could parse JSON and validate content
+        if len(lines) == 8:
+            module_logger.info("Audit log file content verification: Number of lines is correct.")
             first_entry = json.loads(lines[0])
-            if first_entry["action"] == "APP_START" and first_entry["details"]["version"] == "1.0.0":
-                print("First log entry content seems correct.")
+            # Adjusted check for the new structure where details are nested
+            if first_entry["action"] == "APP_START" and first_entry.get("details", {}).get("version") == "1.0.0":
+                module_logger.info("First log entry content seems correct.")
             else:
-                print("First log entry content mismatch.")
+                module_logger.error(f"First log entry content mismatch. Entry: {first_entry}")
         else:
-            print(f"Audit log file content verification: Incorrect number of lines. Expected 8, got {len(lines)}.")
+            module_logger.error(f"Audit log file content verification: Incorrect number of lines. Expected 8, got {len(lines)}.")
 
     except Exception as e:
-        print(f"Error reading or verifying audit log file: {e}")
-
+        module_logger.error(f"Error reading or verifying audit log file: {e}", exc_info=True)
     finally:
-        # Clean up the test log file
         if os.path.exists(test_log_filename):
-            # os.remove(test_log_filename) # Keep it for inspection if needed during manual test
-            print(f"Test log file '{test_log_filename}' is available for inspection.")
-            # For automated tests, uncomment os.remove()
+            module_logger.info(f"Test log file '{test_log_filename}' is available for inspection. For automated tests, it would typically be removed.")
+            # os.remove(test_log_filename)
 
-    print("\n--- AuditLogger Test Finished ---")
+    module_logger.info("\n--- AuditLogger Test Finished ---")
