@@ -215,7 +215,7 @@ if __name__ == '__main__':
     print("\n--- All Tests Finished ---")
 
 
-def derive_key_from_password(password: str, salt: bytes = SALT, iterations: int = 100000, key_length: int = 32) -> bytes:
+def derive_key_from_password(password: str, salt: bytes = SALT, iterations: int = 600000, key_length: int = 32) -> bytes:
     """
     Derives a key from a password using PBKDF2-HMAC-SHA256.
     :param password: The user's password.
