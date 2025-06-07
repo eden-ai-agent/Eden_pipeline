@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env/
+
+# Virtual environments
+venv/
+
+# Logs and output directories
+logs/
+sessions_output/
+
+# Configuration files
+config.json
+test_config.json
+
+# Test output directories
+/test_outputs*/
+
+# Misc
+.DS_Store
+.vscode/
+.idea/
+.pytest_cache/
