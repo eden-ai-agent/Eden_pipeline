@@ -1,0 +1,12 @@
+PyQt5
+sounddevice
+soundfile
+numpy
+torch
+faster-whisper
+pyannote.audio
+transformers
+presidio-analyzer
+presidio-anonymizer
+cryptography
+spacy
