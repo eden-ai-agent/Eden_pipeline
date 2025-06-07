@@ -1,7 +1,6 @@
 import unittest
 import os
 import json
-import sys
 
 # Add the directory containing app.py to sys.path if test_app.py is in a different directory
 # For this environment, assuming app.py is in the root or accessible.
